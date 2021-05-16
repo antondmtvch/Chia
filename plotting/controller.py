@@ -1,4 +1,5 @@
 import sys
+import time
 import typing
 import logging
 import threading
@@ -47,6 +48,7 @@ class Process:
         self.cmd = cmd
 
     def _init(self) -> None:
+        self.start_time = time.time()
         self.instance = subprocess.Popen(
             self.cmd,
             shell=True,
@@ -69,12 +71,6 @@ class Process:
         if self.is_running:
             raise ProcessException('Process is running.')
         self._init()
-
-    def write_stdout(self, queue: StdoutQueue) -> None:
-        if not self.is_running:
-            raise ProcessException('Process is not running.')
-        while self.stdout.readable():
-            queue.put(self.stdout.readline())
 
 
 class PoolMeta(type):
@@ -156,6 +152,30 @@ class ProcessController(metaclass=ControllerMeta):
             process.kill()
             logger.info(f'{Color.RED.format("Kill process:")} {process.pid}')
 
+    def redirect_stdout(self, process: Process) -> int:
+        while True:
+            code = process.instance.poll()
+            if code is not None:
+                break
+            self.queue.put(process.stdout.readline())
+        process.kill()
+        return code
+
+    def await_complete(self, process: Process) -> None:
+        if not process.is_running:
+            raise ProcessException('Process is not running.')
+        code = self.redirect_stdout(process)
+        if code == 0:
+            logger.info(
+                f'{Color.GREEN.format("Finished process:")} {process.pid} '
+                f'{Color.GREEN.format("Status code:")} {code} '
+                f'{Color.GREEN.format("Total time:")} {(time.time() - process.start_time) / 360} hours')
+        else:
+            logger.error(
+                f'{Color.RED.format("ERROR:")} {process.pid} '
+                f'{Color.RED.format("Status code:")} {code} ')
+        self.pool.running.remove(process)
+
     def spawn_processes(self) -> None:
         while True:
             if self.running_is_available:
@@ -165,7 +185,7 @@ class ProcessController(metaclass=ControllerMeta):
                 running, awaiting = awaiting, Process(settings.CMD)
 
                 thread = threading.Thread(
-                    target=running.write_stdout, args=(self.queue,)
+                    target=self.await_complete, args=(running,)
                 )
                 thread.start()
 
