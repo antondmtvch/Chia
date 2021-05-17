@@ -67,10 +67,7 @@ class ServerSocket:
 
     def accept_connections(self) -> 'ClientSocket':
         self.socket.listen()
-        try:
-            return ClientSocket(*self.socket.accept())
-        except KeyboardInterrupt:
-            pass
+        return ClientSocket(*self.socket.accept())
 
     def close(self) -> None:
         self.socket.close()
