@@ -2,18 +2,10 @@ import sys
 import time
 import enum
 import typing
-import logging
 import threading
 import subprocess
 
-from plotting import settings
-
-logging.basicConfig(
-    format='%(name)s | %(levelname)s | %(asctime)s | %(message)s',
-    datefmt='%d-%b-%y %H:%M:%S',
-    level=logging.INFO,
-)
-logger = logging.getLogger(__name__)
+from plotting import settings, logger
 
 
 class Color:
@@ -220,7 +212,8 @@ def check_phase(process: Process, pool: ProcessPool) -> None:
         process.status.current = status
         logger.info(
             f"{Color.YELLOW.format('PID:')} {process.pid} "
-            f"{Color.YELLOW.format('Run phase:')} {status.decode()}"
+            f"{Color.YELLOW.format('Start phase:')} {status.decode()} "
+            f"{Color.YELLOW.format('Running phases:')} {pool.running_phases()} "
         )
 
     stdout = process.stdout
