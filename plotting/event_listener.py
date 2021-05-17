@@ -110,7 +110,6 @@ class EventListener:
     def _receive_and_handle_events(self) -> None:
         event = self.client_socket.receive()
         event = event.decode()
-        logger.info(event)
         if not event:
             return
         if event not in Event.values():
