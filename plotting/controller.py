@@ -1,13 +1,12 @@
 import sys
 import time
+import enum
 import typing
 import logging
 import threading
 import subprocess
-import multiprocessing as mp
-import multiprocessing.queues as mpq
 
-import settings
+from plotting import settings
 
 logging.basicConfig(
     format='%(name)s | %(levelname)s | %(asctime)s | %(message)s',
@@ -20,6 +19,7 @@ logger = logging.getLogger(__name__)
 class Color:
     GREEN = '\x1b[32;1m{0}\x1b[0m'
     RED = '\x1b[31;1m{0}\x1b[0m'
+    YELLOW = '\x1b[33;1m{0}\x1b[0m'
 
 
 class ProcessException(Exception):
@@ -34,13 +34,26 @@ class PoolOverflowingException(PoolException):
     pass
 
 
-class StdoutQueue(mpq.Queue):
-    def __init__(self, *args, **kwargs):
-        ctx = mp.get_context()
-        super().__init__(*args, **kwargs, ctx=ctx)
+class PlottingPhase(bytes, enum.Enum):
+    FIRST = b'STARTING PHASE 1/4'
+    SECOND = b'STARTING PHASE 2/4'
+    THIRD = b'STARTING PHASE 3/4'
+    FOUR = b'STARTING PHASE 4/4'
 
-    def write(self, msg: bytes) -> None:
-        self.put(msg)
+
+class ProgressStatus:
+    _current: PlottingPhase
+
+    def __init__(self):
+        self._current = PlottingPhase.FIRST
+
+    @property
+    def current(self):
+        return self._current
+
+    @current.setter
+    def current(self, value):
+        self._current = value
 
 
 class Process:
@@ -56,6 +69,7 @@ class Process:
         )
         self.stdout = self.instance.stdout
         self.pid = self.instance.pid
+        self.status = ProgressStatus()
 
     @property
     def is_running(self):
@@ -88,15 +102,22 @@ class ProcessPool(metaclass=PoolMeta):
 
     @classmethod
     def running_is_available(cls) -> bool:
-        return cls.running_count() < cls.max_parallel_processes
+        return cls.running_total() < cls.max_parallel_processes
 
     @classmethod
-    def running_count(cls) -> int:
+    def running_total(cls) -> int:
         return len(cls.running)
 
     @classmethod
-    def awaiting_count(cls) -> int:
+    def awaiting_total(cls) -> int:
         return len(cls.awaiting)
+
+    @classmethod
+    def running_phases(cls):
+        return {
+            proc.pid: proc.status.current.decode()
+            for proc in cls.running
+        }
 
     @classmethod
     def add(cls, process: Process) -> None:
@@ -114,14 +135,12 @@ class ProcessPool(metaclass=PoolMeta):
 
 class ControllerMeta(type):
     def __new__(mcs, name, bases, attrs):
-        attrs['_queue'] = StdoutQueue()
         attrs['_pool'] = ProcessPool()
         return super().__new__(mcs, name, bases, attrs)
 
 
 class ProcessController(metaclass=ControllerMeta):
     _pool: ProcessPool
-    _queue: StdoutQueue
 
     def __init__(self):
         self._init_pool()
@@ -131,75 +150,96 @@ class ProcessController(metaclass=ControllerMeta):
         self.pool.add(Process(settings.CMD))
 
     @property
-    def queue(self):
-        return self._queue
-
-    @property
     def pool(self):
         return self._pool
-
-    @property
-    def running_is_available(self) -> bool:
-        if self.pool.awaiting and not self.pool.running:
-            return True
-        if settings.TRIGGER_PHRASE in self.read_stdout().lower() \
-                and self.pool.running_is_available():
-            return True
-        return False
 
     def killall(self) -> None:
         for process in self.pool.running:
             process.kill()
             logger.info(f'{Color.RED.format("Kill process:")} {process.pid}')
 
-    def redirect_stdout(self, process: Process) -> int:
-        while True:
-            code = process.instance.poll()
-            if code is not None:
-                break
-            self.queue.put(process.stdout.readline())
-        process.kill()
-        return code
+    def spawn_available(self) -> bool:
+        if self.pool.awaiting:
+            if not self.pool.running:
+                return True
+            if self.pool.running and self.pool.running_is_available():
+                in_allowed_phases = [
+                    True if proc.status.current in {
+                        PlottingPhase.SECOND,
+                        PlottingPhase.THIRD,
+                        PlottingPhase.FOUR
+                    }
+                    else False
+                    for proc in self.pool.running
+                ]
+                if all(in_allowed_phases):
+                    return True
+                return False
+        return False
 
-    def await_complete(self, process: Process) -> None:
-        if not process.is_running:
-            raise ProcessException('Process is not running.')
-        code = self.redirect_stdout(process)
-        if code == 0:
-            logger.info(
-                f'{Color.GREEN.format("Finished process:")} {process.pid} '
-                f'{Color.GREEN.format("Status code:")} {code} '
-                f'{Color.GREEN.format("Total time:")} {(time.time() - process.start_time) / 360} hours')
-        else:
-            logger.error(
-                f'{Color.RED.format("ERROR:")} {process.pid} '
-                f'{Color.RED.format("Status code:")} {code} ')
-        self.pool.running.remove(process)
+    def spawn(self):
+        awaiting = self.pool.awaiting.pop()
+        awaiting.run()
+
+        running, awaiting = awaiting, Process(settings.CMD)
+
+        thread = threading.Thread(
+            target=check_phase, args=(running, self.pool)
+        )
+        thread.start()
+
+        self.pool.add(running)
+        self.pool.add(awaiting)
+
+        logger.info(
+            f'{Color.GREEN.format("Run PID:")} {running.pid} '
+            f'{Color.GREEN.format("Running total:")} {self.pool.running_total()} '
+            f'{Color.GREEN.format("Awaiting total:")} {self.pool.awaiting_total()} '
+            f'{Color.GREEN.format("Running phases:")} {self.pool.running_phases()} '
+        )
 
     def spawn_processes(self) -> None:
         while True:
-            if self.running_is_available:
-                awaiting = self.pool.awaiting.pop()
-                awaiting.run()
+            if not self.spawn_available():
+                continue
+            self.spawn()
 
-                running, awaiting = awaiting, Process(settings.CMD)
 
-                thread = threading.Thread(
-                    target=self.await_complete, args=(running,)
-                )
-                thread.start()
+def check_phase(process: Process, pool: ProcessPool) -> None:
+    def parse_phase_and_update_process_status() -> None:
+        line = stdout.readline().upper()
+        status = None
+        if PlottingPhase.SECOND in line:
+            status = PlottingPhase.SECOND
+        elif PlottingPhase.THIRD in line:
+            status = PlottingPhase.THIRD
+        elif PlottingPhase.FOUR in line:
+            status = PlottingPhase.FOUR
+        if not status:
+            return
+        process.status.current = status
+        logger.info(
+            f"{Color.YELLOW.format('PID:')} {process.pid} "
+            f"{Color.YELLOW.format('Run phase:')} {status.decode()}"
+        )
 
-                self.pool.add(running)
-                self.pool.add(awaiting)
+    stdout = process.stdout
+    while True:
+        code = process.instance.poll()
+        if code is not None:
+            break
+        parse_phase_and_update_process_status()
 
-                logger.info(
-                    f'{Color.GREEN.format("Running process:")} {running.pid} '
-                    f'{Color.GREEN.format("Running count:")} {self.pool.running_count()} '
-                    f'{Color.GREEN.format("Awaiting count:")} {self.pool.awaiting_count()} '
-                )
-
-    def read_stdout(self) -> bytes:
-        return self.queue.get()
+    if code == 0:
+        logger.info(
+            f'{Color.GREEN.format("Finished process:")} {process.pid} '
+            f'{Color.GREEN.format("Status code:")} {code} '
+            f'{Color.GREEN.format("Total time:")} {(time.time() - process.start_time) / 3600} hours')
+    else:
+        logger.error(
+            f'{Color.RED.format("ERROR:")} {process.pid} '
+            f'{Color.RED.format("Status code:")} {code} ')
+    pool.running.remove(process)
 
 
 def main():
