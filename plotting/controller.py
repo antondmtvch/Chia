@@ -1,5 +1,6 @@
 import sys
 import time
+import enum
 import typing
 import logging
 import threading
@@ -7,7 +8,7 @@ import subprocess
 import multiprocessing as mp
 import multiprocessing.queues as mpq
 
-import settings
+from plotting import settings
 
 logging.basicConfig(
     format='%(name)s | %(levelname)s | %(asctime)s | %(message)s',
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 class Color:
     GREEN = '\x1b[32;1m{0}\x1b[0m'
     RED = '\x1b[31;1m{0}\x1b[0m'
+    YELLOW = '\x1b[33;21m{0}\x1b[0m'
 
 
 class ProcessException(Exception):
@@ -43,6 +45,28 @@ class StdoutQueue(mpq.Queue):
         self.put(msg)
 
 
+class PlottingPhase(bytes, enum.Enum):
+    FIRST = b'STARTING PHASE 1/4'
+    SECOND = b'STARTING PHASE 2/4'
+    THIRD = b'STARTING PHASE 3/4'
+    FOUR = b'STARTING PHASE 4/4'
+
+
+class ProgressStatus:
+    _current: PlottingPhase
+
+    def __init__(self):
+        self._current = PlottingPhase.FIRST
+
+    @property
+    def current(self):
+        return self._current
+
+    @current.setter
+    def current(self, value):
+        self._current = value
+
+
 class Process:
     def __init__(self, cmd: str):
         self.cmd = cmd
@@ -56,6 +80,7 @@ class Process:
         )
         self.stdout = self.instance.stdout
         self.pid = self.instance.pid
+        self.status = ProgressStatus()
 
     @property
     def is_running(self):
@@ -142,7 +167,7 @@ class ProcessController(metaclass=ControllerMeta):
     def running_is_available(self) -> bool:
         if self.pool.awaiting and not self.pool.running:
             return True
-        if settings.TRIGGER_PHRASE in self.read_stdout().lower() \
+        if PlottingPhase.SECOND in self.read_stdout().upper() \
                 and self.pool.running_is_available():
             return True
         return False
@@ -164,7 +189,7 @@ class ProcessController(metaclass=ControllerMeta):
     def await_complete(self, process: Process) -> None:
         if not process.is_running:
             raise ProcessException('Process is not running.')
-        code = self.redirect_stdout(process)
+        code = process_stdout_parser(process)
         if code == 0:
             logger.info(
                 f'{Color.GREEN.format("Finished process:")} {process.pid} '
@@ -176,30 +201,75 @@ class ProcessController(metaclass=ControllerMeta):
                 f'{Color.RED.format("Status code:")} {code} ')
         self.pool.running.remove(process)
 
+    def check(self) -> bool:
+        if self.pool.awaiting:
+            if not self.pool.running:
+                return True
+            if self.pool.running and self.pool.running_is_available():
+                in_second_phase = [
+                    p for p in self.pool.running
+                    if p.status == PlottingPhase.SECOND
+                ]
+                if in_second_phase:
+                    return False
+                return True
+        return False
+
+    def spawn(self):
+        awaiting = self.pool.awaiting.pop()
+        awaiting.run()
+
+        running, awaiting = awaiting, Process(settings.CMD)
+
+        thread = threading.Thread(
+            target=process_stdout_parser, args=(running,)
+        )
+        thread.start()
+
+        self.pool.add(running)
+        self.pool.add(awaiting)
+
+        logger.info(
+            f'{Color.GREEN.format("Running process:")} {running.pid} '
+            f'{Color.GREEN.format("Running count:")} {self.pool.running_count()} '
+            f'{Color.GREEN.format("Awaiting count:")} {self.pool.awaiting_count()} '
+        )
+
     def spawn_processes(self) -> None:
         while True:
-            if self.running_is_available:
-                awaiting = self.pool.awaiting.pop()
-                awaiting.run()
-
-                running, awaiting = awaiting, Process(settings.CMD)
-
-                thread = threading.Thread(
-                    target=self.await_complete, args=(running,)
-                )
-                thread.start()
-
-                self.pool.add(running)
-                self.pool.add(awaiting)
-
-                logger.info(
-                    f'{Color.GREEN.format("Running process:")} {running.pid} '
-                    f'{Color.GREEN.format("Running count:")} {self.pool.running_count()} '
-                    f'{Color.GREEN.format("Awaiting count:")} {self.pool.awaiting_count()} '
-                )
+            if not self.check():
+                continue
+            self.spawn()
 
     def read_stdout(self) -> bytes:
         return self.queue.get()
+
+
+def process_stdout_parser(process: Process) -> int:
+    def parse_phase(_stdout: typing.Optional[typing.IO[bytes]]) -> None:
+        line = _stdout.readline().upper()
+        status = None
+        if PlottingPhase.SECOND in line:
+            status = PlottingPhase.SECOND
+        elif PlottingPhase.THIRD in line:
+            status = PlottingPhase.THIRD
+        elif PlottingPhase.FOUR in line:
+            status = PlottingPhase.FOUR
+        if not status:
+            return
+        process.status = status
+        logger.info(
+            f"{Color.YELLOW.format('PID:')} {process.pid} "
+            f"{Color.YELLOW.format('Run phase:')} {status.decode()}"
+        )
+
+    stdout = process.stdout
+    while True:
+        code = process.instance.poll()
+        if code is not None:
+            break
+        parse_phase(stdout)
+    return code
 
 
 def main():
