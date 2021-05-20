@@ -1,8 +1,8 @@
 import time
 import asyncio
-import settings
 
-from logger import logger, Color
+from controller import settings
+from controller.logger import logger, Color
 
 logger.name = 'commands-client'
 
@@ -40,13 +40,9 @@ async def commands_client(loop, config):
     logger.info(Color.GREEN.format('Commands client: Close'))
 
 
-def main():
+def run():
     loop = asyncio.get_event_loop()
     loop.run_until_complete(
         commands_client(loop, settings)
     )
     loop.close()
-
-
-if __name__ == '__main__':
-    main()

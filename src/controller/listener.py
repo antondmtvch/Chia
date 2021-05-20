@@ -4,9 +4,8 @@ import asyncio
 import datetime
 import multiprocessing
 
-import settings
-
-from logger import logger, Color
+from controller import settings
+from controller.logger import logger, Color
 
 
 class Command(str, enum.Enum):

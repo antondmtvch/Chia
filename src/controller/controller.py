@@ -3,12 +3,12 @@ import time
 import enum
 import typing
 import asyncio
-import settings
 import threading
 import subprocess
 
-from logger import logger, Color
-from listener import CommandsListener, Command, CommandsQueue
+from controller import settings
+from controller.logger import logger, Color
+from controller.listener import CommandsListener, Command, CommandsQueue
 
 
 class ProcessException(Exception):
