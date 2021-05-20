@@ -1,4 +1,4 @@
-from controller.client import run
+from controller import client
 
 if __name__ == '__main__':
-    run()
+    client.run()
