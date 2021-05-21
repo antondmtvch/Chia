@@ -6,21 +6,11 @@ import asyncio
 import threading
 import subprocess
 
+import controller.exceptions as ce
+
 from controller import settings
 from controller.logger import logger, Color
 from controller.listener import CommandsListener, Command, CommandsQueue
-
-
-class ProcessException(Exception):
-    pass
-
-
-class PoolException(Exception):
-    pass
-
-
-class PoolOverflowingException(PoolException):
-    pass
 
 
 class PlottingPhase(bytes, enum.Enum):
@@ -65,13 +55,13 @@ class Process:
 
     def kill(self) -> None:
         if not self.is_running:
-            raise ProcessException('Process is not running.')
+            raise ce.ProcessException('Process is not running.')
         self.instance.kill()
         delattr(self, 'instance')
 
     def run(self) -> None:
         if self.is_running:
-            raise ProcessException('Process is running.')
+            raise ce.ProcessException('Process is running.')
         self._init()
 
 
