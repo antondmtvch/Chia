@@ -4,7 +4,6 @@ import asyncio
 import datetime
 import multiprocessing
 
-from controller import settings
 from controller.logger import logger, Color
 
 
@@ -21,9 +20,6 @@ class CommandsQueue:
     def __init__(self):
         self._queue = multiprocessing.Queue()
 
-    def __repr__(self):
-        return repr(self.queue)
-
     @property
     def queue(self):
         return self._queue
@@ -32,7 +28,7 @@ class CommandsQueue:
     def size(self):
         return self.queue.qsize()
 
-    def put(self, value: dict):
+    def put(self, value: typing.Dict[str, typing.Any]):
         self.queue.put(value)
 
     def get(self):
@@ -82,30 +78,4 @@ class CommandsListener:
     @staticmethod
     async def _receive(reader) -> typing.Optional[str]:
         command = await reader.read(1024)
-        command = command.decode().upper().strip()
-        return command
-
-
-def init_listener(config):
-    listener = CommandsListener(
-        *config.LISTENER_ADDR
-    )
-    loop = asyncio.new_event_loop()
-    try:
-        loop.run_until_complete(listener.listen())
-    except KeyboardInterrupt:
-        loop.close()
-        logger.info(
-            Color.BLUE.format('%s Down') % listener.__class__.__name__
-        )
-
-
-if __name__ == '__main__':
-    import threading
-
-    t = threading.Thread(
-        target=init_listener,
-        args=(settings,)
-    )
-    t.start()
-
+        return command.decode().upper().strip()
