@@ -10,7 +10,7 @@ class Color:
 
 def setup_logger():
     logging.basicConfig(
-        format='%(name)s | %(process)d | %(levelname)s | %(asctime)s | %(message)s',
+        format='%(name)s | pid: %(process)d | %(levelname)s | %(asctime)s | %(message)s',
         datefmt='%d-%b-%y %H:%M:%S',
         level=logging.INFO,
     )
