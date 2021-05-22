@@ -2,9 +2,9 @@
 
 MEMORY=4096
 THREADS=4
-BASE_DIR="/home/ant/chiapos-bin"
+BASE_DIR="/home/anton/chiapos-bin"
 TEMP_DIR="/tmp"
-PLOTS_DIR="/media/ant/HDD1/plots"
+PLOTS_DIR="/mnt/md0/plots"
 NOW=$(date +"%Y%m%dT%H%M")
 LOG_PATH="$BASE_DIR/log/$NOW-plot.log"
 

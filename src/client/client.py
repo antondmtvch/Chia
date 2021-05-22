@@ -1,8 +1,8 @@
 import time
 import asyncio
 
-from controller import settings
-from controller.logger import logger, Color
+from src.controller import settings
+from src.controller.logger import logger, Color
 
 logger.name = 'commands-client'
 
@@ -15,25 +15,19 @@ async def commands_client(loop, config):
     except ConnectionRefusedError as e:
         logger.error(Color.RED.format(e))
         return
-    logger.info(
-        Color.GREEN.format('Connected on %s:%s') % config.LISTENER_ADDR
-    )
+
+    logger.info(Color.GREEN.format('Connected on %s:%s') % config.LISTENER_ADDR)
     time.sleep(1)
+
     while True:
         try:
-            message = input(
-                Color.YELLOW.format('Input [pause|resume]: ')
-            )
+            message = input(Color.YELLOW.format('Input [pause|resume]: '))
             writer.write(message.encode())
             data = await reader.read(1024)
-            logger.info(
-                Color.GREEN.format('Response: %s') % data.decode()
-            )
+            logger.info(Color.GREEN.format('Response: %s') % data.decode())
             time.sleep(0.5)
         except KeyboardInterrupt:
-            command = input(
-                Color.BLUE.format('Close client? [yes/no]: ')
-            ).lower()
+            command = input(Color.BLUE.format('Close client? [yes/no]: ')).lower()
             if command == 'yes':
                 break
     writer.close()
