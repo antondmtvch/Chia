@@ -1,8 +1,8 @@
 import time
 import asyncio
 
-from controller import settings
-from controller.logger import logger, Color
+from src.controller import settings
+from src.controller.logger import logger, Color
 
 logger.name = 'commands-client'
 

@@ -6,11 +6,11 @@ import asyncio
 import threading
 import subprocess
 
-import controller.exceptions as ce
+import src.controller.exceptions as ex
+import src.controller.settings as settings
 
-from controller import settings
-from controller.logger import logger, Color
-from controller.listener import CommandsListener, Command, CommandsQueue
+from src.controller.logger import logger, Color
+from src.controller.listener import CommandsListener, Command, CommandsQueue
 
 
 class PlottingPhase(bytes, enum.Enum):
@@ -55,13 +55,13 @@ class Process:
 
     def kill(self) -> None:
         if not self.is_running:
-            raise ce.ProcessException('Process is not running.')
+            raise ex.ProcessException('Process is not running.')
         self.instance.kill()
         delattr(self, 'instance')
 
     def run(self) -> None:
         if self.is_running:
-            raise ce.ProcessException('Process is running.')
+            raise ex.ProcessException('Process is running.')
         self._init()
 
 

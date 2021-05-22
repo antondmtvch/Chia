@@ -4,7 +4,7 @@ import asyncio
 import datetime
 import multiprocessing
 
-from controller.logger import logger, Color
+from src.controller.logger import logger, Color
 
 
 class Command(str, enum.Enum):
